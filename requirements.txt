@@ -6,3 +6,7 @@ tk
 ccxt
 matplotlib
 scipy
+ccxt
+requests
+pandas
+pyTelegramBotAPI
