@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
 import time
+import os
 import threading
 from telebot import TeleBot
 from flask import Flask
@@ -20,31 +21,21 @@ app = Flask(__name__)
 def home():
     return "Trade Sinyal Botu Çalışıyor 🚀"
 
-# 📌 Binance Tüm USDT Çiftlerini Çekme
-def get_binance_pairs():
-    try:
-        response = requests.get("https://api.binance.com/api/v3/ticker/price")
-        data = response.json()
-        pairs = [d['symbol'] for d in data if d['symbol'].endswith("USDT")]
-        return pairs
-    except Exception as e:
-        print(f"⚠️ Binance çiftleri alınırken hata oluştu: {e}")
-        return []
-
 # 📌 **Fiyat Alma Fonksiyonu**
 def get_price(coin):
     try:
         response = requests.get(f"{COINGECKO_API_URL}/simple/price?ids={coin}&vs_currencies=usd")
         data = response.json()
-        if response.status_code != 200:
+        if response.status_code == 200:
+            return data.get(coin, {}).get("usd")
+        else:
             print(f"⚠️ API Hatası! Durum Kodu: {response.status_code} - Yanıt: {data}")
-        return data[coin]["usd"]
+            return None
     except Exception as e:
         print(f"⚠️ {coin} fiyat alınırken hata oluştu: {e}")
         return None
 
-
-# 📌 Telegram Mesaj Gönderme
+# 📌 **Telegram Mesaj Gönderme**
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
@@ -57,7 +48,7 @@ def send_telegram_message(message):
     except Exception as e:
         print(f"🚨 Telegram mesajı gönderilemedi! Hata: {e}")
 
-# 📌 API ve Telegram Testleri
+# 📌 **API ve Telegram Testleri**
 def test_get_price():
     response = requests.get(f"{COINGECKO_API_URL}/simple/price?ids=bitcoin&vs_currencies=usd")
     return response.status_code == 200
@@ -80,25 +71,27 @@ def run_tests():
     print("✅ Tüm testler başarılı! Bot başlatılıyor...")
     return True
 
-# 📌 Bot Çalıştırma (Arka Planda Çalışır)
+# 📌 **Bot Çalıştırma (Arka Planda Çalışır)**
 def run_bot():
-    pairs = get_binance_pairs()
+    coins = ["bitcoin", "ethereum", "binancecoin"]
     while True:
-        for pair in pairs:
-            coin = pair.lower().replace("usdt", "")
+        for coin in coins:
             price = get_price(coin)
             if price:
-                message = f"📢 {pair} Güncel Fiyat: {price} USDT"
+                message = f"📢 {coin.upper()} Güncel Fiyat: {price} USD"
                 send_telegram_message(message)
-        time.sleep(1800)  # 30 Dakikada bir kontrol
+        time.sleep(3600)
 
-# 📌 Ana Çalıştırma
+# 📌 **Ana Çalıştırma**
 if __name__ == "__main__":
     if run_tests():  # **Testler başarılıysa bot başlatılacak**
         send_telegram_message("🚀 Bot Başlatıldı! Fiyat güncellemeleri paylaşılacak.")
+
         # Botu arka planda başlatmak için ayrı bir thread kullan
         bot_thread = threading.Thread(target=run_bot)
+        bot_thread.daemon = True
         bot_thread.start()
 
     # Flask Web Server Başlat
-    app.run(host="0.0.0.0", port=10000)
+    PORT = int(os.environ.get("PORT", 10000))  # Render'ın belirlediği portu al
+    app.run(host="0.0.0.0", port=PORT)
