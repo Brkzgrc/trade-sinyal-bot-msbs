@@ -1,123 +1,90 @@
-import os
 import requests
-import time
 import pandas as pd
-import ccxt
-from datetime import datetime
+import time
 from telebot import TeleBot
 
-# ✅ TELEGRAM BOT TOKEN ve CHAT ID (Render'dan Ortam Değişkenlerinden Okunuyor)
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# Telegram Bot Bilgileri
+TELEGRAM_BOT_TOKEN = "7243733230:AAFw0XxLKiShamQcElSnXc984DdaXGvBoEQ"
+TELEGRAM_CHAT_ID = "5124859166"
 bot = TeleBot(TELEGRAM_BOT_TOKEN)
 
-# ✅ Binance API Bağlantısı
-binance = ccxt.binance()
+# CoinGecko API URL
+COINGECKO_API_URL = "https://api.coingecko.com/api/v3"
 
-# ✅ CoinMarketCap API Key (Ekstra piyasa verileri için)
-CMC_API_KEY = os.getenv("CMC_API_KEY")
-CMC_URL = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
-
-# ✅ Teknik İndikatör Hesaplamaları
-def calculate_rsi(data, period=14):
-    delta = data.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def calculate_macd(data):
-    short_ema = data.ewm(span=12, adjust=False).mean()
-    long_ema = data.ewm(span=26, adjust=False).mean()
-    macd = short_ema - long_ema
-    signal = macd.ewm(span=9, adjust=False).mean()
-    return macd, signal
-
-def calculate_bollinger_bands(data, window=20):
-    sma = data.rolling(window=window).mean()
-    std = data.rolling(window=window).std()
-    upper_band = sma + (std * 2)
-    lower_band = sma - (std * 2)
-    return upper_band, lower_band
-
-def calculate_mavilim_w(data):
-    return data.ewm(span=21, adjust=False).mean()
-
-def calculate_double_ema(data, period=21):
-    ema1 = data.ewm(span=period, adjust=False).mean()
-    ema2 = ema1.ewm(span=period, adjust=False).mean()
-    return (2 * ema1) - ema2
-
-def calculate_kama(data, period=21):
-    return data.ewm(span=period, adjust=False).mean()
-
-# ✅ Binance’ten Piyasa Verilerini Çekme
-def get_binance_data(symbol, timeframe='1h'):
-    candles = binance.fetch_ohlcv(symbol, timeframe, limit=100)
-    df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    return df
-
-# ✅ CoinMarketCap’ten Ek Verileri Çekme
-def get_coinmarketcap_data(symbol):
-    headers = {'X-CMC_PRO_API_KEY': CMC_API_KEY}
-    params = {'symbol': symbol.replace('/USDT', ''), 'convert': 'USD'}
-    response = requests.get(CMC_URL, headers=headers, params=params)
-    if response.status_code == 200:
+# Fiyat bilgisini çekmek için fonksiyon
+def get_price(symbol):
+    try:
+        response = requests.get(f"{COINGECKO_API_URL}/simple/price?ids={symbol}&vs_currencies=usd")
         data = response.json()
-        coin = list(data['data'].values())[0]
-        return {
-            "market_cap": coin['quote']['USD']['market_cap'],
-            "volume_24h": coin['quote']['USD']['volume_24h'],
-            "circulating_supply": coin['circulating_supply']
-        }
-    return None
+        return data[symbol]['usd']
+    except Exception as e:
+        print(f"Hata: {e}")
+        return None
 
-# ✅ Sinyal Üretme
-def analyze_coin(symbol):
-    df = get_binance_data(symbol)
-    close_prices = df['close']
+# OHLCV verisini çekmek için fonksiyon
+def get_ohlcv(symbol):
+    try:
+        response = requests.get(f"{COINGECKO_API_URL}/coins/{symbol}/market_chart?vs_currency=usd&days=1&interval=hourly")
+        data = response.json()
+        ohlcv_data = data['prices']  # [timestamp, price]
+        df = pd.DataFrame(ohlcv_data, columns=["timestamp", "close"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit='ms')
+        return df
+    except Exception as e:
+        print(f"Hata: {e}")
+        return None
 
-    # 📊 İndikatör Hesaplamaları
-    rsi = calculate_rsi(close_prices).iloc[-1]
-    macd, signal = calculate_macd(close_prices)
-    macd_signal = macd.iloc[-1] > signal.iloc[-1]
-    upper_band, lower_band = calculate_bollinger_bands(close_prices)
-    bollinger_signal = close_prices.iloc[-1] < lower_band.iloc[-1]
-    mavilim_signal = close_prices.iloc[-1] > calculate_mavilim_w(close_prices).iloc[-1]
-    double_ema_signal = close_prices.iloc[-1] > calculate_double_ema(close_prices).iloc[-1]
-    kama_signal = close_prices.iloc[-1] > calculate_kama(close_prices).iloc[-1]
+# Telegram bildirim fonksiyonu
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    try:
+        response = requests.post(url, json=payload)
+        return response.json()
+    except Exception as e:
+        print("Telegram mesajı gönderilirken hata:", e)
 
-    # ✅ Sinyal Onay Sistemi
-    indicators_confirmed = sum([rsi < 30, macd_signal, bollinger_signal, mavilim_signal, double_ema_signal, kama_signal])
-    total_indicators = 6
-    confirmation_ratio = f"{indicators_confirmed}/{total_indicators}"
+# Sinyal kontrolü
+def check_signal(coin):
+    df = get_ohlcv(coin)
+    if df is None:
+        return None
 
-    # ✅ CoinMarketCap Ek Verileri
-    cmc_data = get_coinmarketcap_data(symbol)
-    market_cap = cmc_data["market_cap"] if cmc_data else "Bilinmiyor"
-    volume_24h = cmc_data["volume_24h"] if cmc_data else "Bilinmiyor"
+    latest_price = df["close"].iloc[-1]
 
-    # ✅ Sinyal Üretme Kararı
-    if indicators_confirmed >= 5:
-        signal_text = f"""
-🟢 **ALIM SİNYALİ** 🟢
-Coin: {symbol}
-Fiyat: {close_prices.iloc[-1]:.4f} USDT
-İndikatör Onayı: {confirmation_ratio}
-📊 Piyasa Değeri: {market_cap:,} USD
-📉 24s Hacim: {volume_24h:,} USD
-"""
-        bot.send_message(TELEGRAM_CHAT_ID, signal_text)
-        print(signal_text)
+    # RSI Hesaplama
+    delta = df["close"].diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(window=14).mean()
+    avg_loss = loss.rolling(window=14).mean()
+    rs = avg_gain / avg_loss
+    df["rsi"] = 100 - (100 / (1 + rs))
 
-# ✅ Ana Döngü
-def main():
+    latest_rsi = df["rsi"].iloc[-1]
+
+    # Basit RSI sinyali (Örnek)
+    if latest_rsi < 30:
+        signal = "BUY"
+    elif latest_rsi > 70:
+        signal = "SELL"
+    else:
+        signal = "NO SIGNAL"
+
+    return signal, latest_price, latest_rsi
+
+# Ana loop
+def run_bot():
+    coins = ["bitcoin", "ethereum", "binancecoin"]
     while True:
-        coins = ["BTC/USDT", "ETH/USDT", "XRP/USDT", "ADA/USDT", "BNB/USDT", "SOL/USDT"]
         for coin in coins:
-            analyze_coin(coin)
-        time.sleep(1800)  # 30 Dakika Arayla Çalıştır
+            signal, price, rsi = check_signal(coin)
+            if signal != "NO SIGNAL":
+                message = f"📢 {coin.upper()} Sinyali: {signal}\n💰 Fiyat: {price} USD\n📊 RSI: {rsi:.2f}"
+                send_telegram_message(message)
+        time.sleep(3600)
 
+# Botu başlat
 if __name__ == "__main__":
-    main()
+    send_telegram_message("🚀 Bot Başlatıldı!")
+    run_bot()
