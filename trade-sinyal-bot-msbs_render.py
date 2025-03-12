@@ -5,7 +5,7 @@ from telebot import TeleBot
 from flask import Flask
 
 # Telegram Bot Bilgileri
-TELEGRAM_BOT_TOKEN = "7243733230:AAFw0XxLKiShamQcElSnXc984DdaXGvBoEQ"
+TELEGRAM_BOT_TOKEN = "7243733230:AAGjZEjMlkASBO0hsGRL7uydC922rcfMVuY"
 TELEGRAM_CHAT_ID = "5124859166"
 bot = TeleBot(TELEGRAM_BOT_TOKEN)
 
