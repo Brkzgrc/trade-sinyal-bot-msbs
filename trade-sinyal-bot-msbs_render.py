@@ -16,7 +16,11 @@ def get_price(symbol):
     try:
         response = requests.get(f"{COINGECKO_API_URL}/simple/price?ids={symbol}&vs_currencies=usd")
         data = response.json()
-        return data[symbol]['usd']
+        if symbol in data and 'usd' in data[symbol]:
+            return data[symbol]['usd']
+        else:
+            print(f"Hata: CoinGecko API {symbol} için fiyat verisi döndüremedi.")
+            return None
     except Exception as e:
         print(f"Hata: {e}")
         return None
@@ -26,10 +30,14 @@ def get_ohlcv(symbol):
     try:
         response = requests.get(f"{COINGECKO_API_URL}/coins/{symbol}/market_chart?vs_currency=usd&days=1&interval=hourly")
         data = response.json()
-        ohlcv_data = data['prices']  # [timestamp, price]
-        df = pd.DataFrame(ohlcv_data, columns=["timestamp", "close"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit='ms')
-        return df
+        if "prices" in data:
+            ohlcv_data = data["prices"]
+            df = pd.DataFrame(ohlcv_data, columns=["timestamp", "close"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit='ms')
+            return df
+        else:
+            print(f"Hata: CoinGecko API {symbol} için OHLCV verisi döndüremedi.")
+            return None
     except Exception as e:
         print(f"Hata: {e}")
         return None
@@ -47,8 +55,8 @@ def send_telegram_message(message):
 # Sinyal kontrolü
 def check_signal(coin):
     df = get_ohlcv(coin)
-    if df is None:
-        return None
+    if df is None or df.empty:
+        return None, None, None
 
     latest_price = df["close"].iloc[-1]
 
@@ -79,7 +87,7 @@ def run_bot():
     while True:
         for coin in coins:
             signal, price, rsi = check_signal(coin)
-            if signal != "NO SIGNAL":
+            if signal and signal != "NO SIGNAL":
                 message = f"📢 {coin.upper()} Sinyali: {signal}\n💰 Fiyat: {price} USD\n📊 RSI: {rsi:.2f}"
                 send_telegram_message(message)
         time.sleep(3600)
