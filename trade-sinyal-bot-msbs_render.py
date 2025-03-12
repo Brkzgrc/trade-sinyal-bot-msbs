@@ -2,6 +2,7 @@ import requests
 import pandas as pd
 import time
 from telebot import TeleBot
+from flask import Flask
 
 # Telegram Bot Bilgileri
 TELEGRAM_BOT_TOKEN = "7243733230:AAFw0XxLKiShamQcElSnXc984DdaXGvBoEQ"
@@ -11,88 +12,64 @@ bot = TeleBot(TELEGRAM_BOT_TOKEN)
 # CoinGecko API URL
 COINGECKO_API_URL = "https://api.coingecko.com/api/v3"
 
-# Fiyat bilgisini çekmek için fonksiyon
-def get_price(symbol):
-    try:
-        response = requests.get(f"{COINGECKO_API_URL}/simple/price?ids={symbol}&vs_currencies=usd")
-        data = response.json()
-        if symbol in data and 'usd' in data[symbol]:
-            return data[symbol]['usd']
-        else:
-            print(f"Hata: CoinGecko API {symbol} için fiyat verisi döndüremedi.")
-            return None
-    except Exception as e:
-        print(f"Hata: {e}")
-        return None
+# Flask Web Server
+app = Flask(__name__)
 
-# OHLCV verisini çekmek için fonksiyon
-def get_ohlcv(symbol):
-    try:
-        response = requests.get(f"{COINGECKO_API_URL}/coins/{symbol}/market_chart?vs_currency=usd&days=1&interval=hourly")
-        data = response.json()
-        if "prices" in data:
-            ohlcv_data = data["prices"]
-            df = pd.DataFrame(ohlcv_data, columns=["timestamp", "close"])
-            df["timestamp"] = pd.to_datetime(df["timestamp"], unit='ms')
-            return df
-        else:
-            print(f"Hata: CoinGecko API {symbol} için OHLCV verisi döndüremedi.")
-            return None
-    except Exception as e:
-        print(f"Hata: {e}")
-        return None
+@app.route("/")
+def home():
+    return "Trade Sinyal Botu Çalışıyor 🚀"
 
-# Telegram bildirim fonksiyonu
+# 📌 API Testi: CoinGecko Fiyat Çekme Kontrolü
+def test_get_price():
+    response = requests.get(f"{COINGECKO_API_URL}/simple/price?ids=bitcoin&vs_currencies=usd")
+    return response.status_code == 200
+
+# 📌 Telegram Mesaj Testi
+def test_telegram():
+    message = "✅ Telegram Bot Testi Başarılı!"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    response = requests.post(url, json=payload)
+    return response.status_code == 200
+
+# 📌 **Tüm Testleri Çalıştır**
+def run_tests():
+    print("🚀 Otomatik Testler Başlatılıyor...")
+    if not test_get_price():
+        print("❌ API testi başarısız! Bot başlatılmıyor.")
+        return False
+    if not test_telegram():
+        print("❌ Telegram testi başarısız! Bot başlatılmıyor.")
+        return False
+    print("✅ Tüm testler başarılı! Bot başlatılıyor...")
+    return True
+
+# 📌 **Bot Çalıştırma Fonksiyonları**
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
     try:
-        response = requests.post(url, json=payload)
-        return response.json()
+        requests.post(url, json=payload)
     except Exception as e:
         print("Telegram mesajı gönderilirken hata:", e)
 
-# Sinyal kontrolü
-def check_signal(coin):
-    df = get_ohlcv(coin)
-    if df is None or df.empty:
-        return None, None, None
-
-    latest_price = df["close"].iloc[-1]
-
-    # RSI Hesaplama
-    delta = df["close"].diff()
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
-    avg_gain = gain.rolling(window=14).mean()
-    avg_loss = loss.rolling(window=14).mean()
-    rs = avg_gain / avg_loss
-    df["rsi"] = 100 - (100 / (1 + rs))
-
-    latest_rsi = df["rsi"].iloc[-1]
-
-    # Basit RSI sinyali (Örnek)
-    if latest_rsi < 30:
-        signal = "BUY"
-    elif latest_rsi > 70:
-        signal = "SELL"
-    else:
-        signal = "NO SIGNAL"
-
-    return signal, latest_price, latest_rsi
-
-# Ana loop
 def run_bot():
     coins = ["bitcoin", "ethereum", "binancecoin"]
     while True:
         for coin in coins:
-            signal, price, rsi = check_signal(coin)
-            if signal and signal != "NO SIGNAL":
-                message = f"📢 {coin.upper()} Sinyali: {signal}\n💰 Fiyat: {price} USD\n📊 RSI: {rsi:.2f}"
+            price = get_price(coin)
+            if price:
+                message = f"📢 {coin.upper()} Güncel Fiyat: {price} USD"
                 send_telegram_message(message)
         time.sleep(3600)
 
-# Botu başlat
+# 📌 **Ana Çalıştırma**
 if __name__ == "__main__":
-    send_telegram_message("🚀 Bot Başlatıldı!")
-    run_bot()
+    if run_tests():  # **Testler başarılıysa bot başlatılacak**
+        send_telegram_message("🚀 Bot Başlatıldı!")
+        run_bot()
+    else:
+        print("❌ Testler başarısız, bot çalıştırılmadı.")
+
+    # Flask Web Server Başlat
+    app.run(host="0.0.0.0", port=10000)
