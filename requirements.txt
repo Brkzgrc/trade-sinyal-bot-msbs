@@ -10,3 +10,4 @@ ccxt
 requests
 pandas
 pyTelegramBotAPI
+flask 
