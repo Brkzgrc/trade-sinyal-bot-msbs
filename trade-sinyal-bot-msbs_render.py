@@ -1,7 +1,6 @@
 import requests
 import pandas as pd
 import time
-import os
 import threading
 from telebot import TeleBot
 from flask import Flask
@@ -26,11 +25,7 @@ def get_price(coin):
     try:
         response = requests.get(f"{COINGECKO_API_URL}/simple/price?ids={coin}&vs_currencies=usd")
         data = response.json()
-        if response.status_code == 200:
-            return data.get(coin, {}).get("usd")
-        else:
-            print(f"⚠️ API Hatası! Durum Kodu: {response.status_code} - Yanıt: {data}")
-            return None
+        return data[coin]["usd"]
     except Exception as e:
         print(f"⚠️ {coin} fiyat alınırken hata oluştu: {e}")
         return None
@@ -47,6 +42,11 @@ def send_telegram_message(message):
             print(f"⚠️ Telegram mesajı başarısız! Hata kodu: {response.status_code}")
     except Exception as e:
         print(f"🚨 Telegram mesajı gönderilemedi! Hata: {e}")
+
+# 📌 **Telegram Komut Dinleyici**
+@bot.message_handler(commands=['start'])
+def start_message(message):
+    bot.send_message(message.chat.id, "🚀 Trade Sinyal Botu Aktif! Güncellemeleri buradan alacaksınız.")
 
 # 📌 **API ve Telegram Testleri**
 def test_get_price():
@@ -80,18 +80,19 @@ def run_bot():
             if price:
                 message = f"📢 {coin.upper()} Güncel Fiyat: {price} USD"
                 send_telegram_message(message)
-        time.sleep(3600)
+        time.sleep(900)  # **15 Dakikada Bir Güncelleme**
 
 # 📌 **Ana Çalıştırma**
 if __name__ == "__main__":
     if run_tests():  # **Testler başarılıysa bot başlatılacak**
         send_telegram_message("🚀 Bot Başlatıldı! Fiyat güncellemeleri paylaşılacak.")
-
-        # Botu arka planda başlatmak için ayrı bir thread kullan
+        
+        # Bot ve Flask'ı Paralel Çalıştır
         bot_thread = threading.Thread(target=run_bot)
-        bot_thread.daemon = True
         bot_thread.start()
-
+        
+        bot_polling_thread = threading.Thread(target=bot.polling, kwargs={'none_stop': True})
+        bot_polling_thread.start()
+    
     # Flask Web Server Başlat
-    PORT = int(os.environ.get("PORT", 10000))  # Render'ın belirlediği portu al
-    app.run(host="0.0.0.0", port=PORT)
+    app.run(host="0.0.0.0", port=10000)
