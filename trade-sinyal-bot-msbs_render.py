@@ -1,17 +1,11 @@
 import requests
-import pandas as pd
-import time
-import threading
-from telebot import TeleBot
-from flask import Flask
+import telebot
+from flask import Flask, request
 
 # ✅ Telegram Bot Bilgileri
 TELEGRAM_BOT_TOKEN = "7583261338:AAHASreSYIaX-6QAXIUflpyf5HnbQXq81Dg"
 TELEGRAM_CHAT_ID = "5124859166"
-bot = TeleBot(TELEGRAM_BOT_TOKEN)
-
-# ✅ CoinGecko API URL
-COINGECKO_API_URL = "https://api.coingecko.com/api/v3"
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 # ✅ Flask Web Server
 app = Flask(__name__)
@@ -20,79 +14,32 @@ app = Flask(__name__)
 def home():
     return "Trade Sinyal Botu Çalışıyor 🚀"
 
-# 📌 **Fiyat Alma Fonksiyonu**
-def get_price(coin):
-    try:
-        response = requests.get(f"{COINGECKO_API_URL}/simple/price?ids={coin}&vs_currencies=usd")
-        data = response.json()
-        return data[coin]["usd"]
-    except Exception as e:
-        print(f"⚠️ {coin} fiyat alınırken hata oluştu: {e}")
-        return None
-
-# 📌 **Telegram Mesaj Gönderme**
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-    try:
-        response = requests.post(url, json=payload)
-        if response.status_code == 200:
-            print(f"✅ Telegram Mesajı Gönderildi: {message}")
-        else:
-            print(f"⚠️ Telegram mesajı başarısız! Hata kodu: {response.status_code}")
-    except Exception as e:
-        print(f"🚨 Telegram mesajı gönderilemedi! Hata: {e}")
-
-# 📌 **Telegram Komut Dinleyici**
+# 📌 **Telegram'da `/start` Komutunu Tanımla**
 @bot.message_handler(commands=['start'])
-def start_message(message):
-    bot.send_message(message.chat.id, "🚀 Trade Sinyal Botu Aktif! Güncellemeleri buradan alacaksınız.")
+def send_welcome(message):
+    bot.reply_to(message, "✅ Bot çalışıyor! Hoş geldin. 🚀")
 
-# 📌 **API ve Telegram Testleri**
-def test_get_price():
-    response = requests.get(f"{COINGECKO_API_URL}/simple/price?ids=bitcoin&vs_currencies=usd")
-    return response.status_code == 200
+# 📌 **Webhook Kullanarak Telegram'dan Mesajları Dinleme**
+@app.route(f"/{TELEGRAM_BOT_TOKEN}", methods=["POST"])
+def webhook():
+    json_str = request.get_data().decode("UTF-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "!", 200
 
-def test_telegram():
-    message = "✅ Telegram Bot Testi Başarılı!"
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-    response = requests.post(url, json=payload)
-    return response.status_code == 200
-
-def run_tests():
-    print("🚀 Otomatik Testler Başlatılıyor...")
-    if not test_get_price():
-        print("❌ API testi başarısız! Bot başlatılmıyor.")
-        return False
-    if not test_telegram():
-        print("❌ Telegram testi başarısız! Bot başlatılmıyor.")
-        return False
-    print("✅ Tüm testler başarılı! Bot başlatılıyor...")
-    return True
-
-# 📌 **Bot Çalıştırma (Arka Planda Çalışır)**
+# 📌 **Botu Başlat**
 def run_bot():
-    coins = ["bitcoin", "ethereum", "binancecoin"]
-    while True:
-        for coin in coins:
-            price = get_price(coin)
-            if price:
-                message = f"📢 {coin.upper()} Güncel Fiyat: {price} USD"
-                send_telegram_message(message)
-        time.sleep(900)  # **15 Dakikada Bir Güncelleme**
+    bot.infinity_polling()
 
 # 📌 **Ana Çalıştırma**
 if __name__ == "__main__":
-    if run_tests():  # **Testler başarılıysa bot başlatılacak**
-        send_telegram_message("🚀 Bot Başlatıldı! Fiyat güncellemeleri paylaşılacak.")
-        
-        # Bot ve Flask'ı Paralel Çalıştır
-        bot_thread = threading.Thread(target=run_bot)
-        bot_thread.start()
-        
-        bot_polling_thread = threading.Thread(target=bot.polling, kwargs={'none_stop': True})
-        bot_polling_thread.start()
-    
+    # Webhook'u ayarla
+    bot.remove_webhook()
+    bot.set_webhook(url=f"https://trade-sinyal-bot-msbs.onrender.com/{TELEGRAM_BOT_TOKEN}")
+
+    import threading
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.start()
+
     # Flask Web Server Başlat
     app.run(host="0.0.0.0", port=10000)
