@@ -31,15 +31,18 @@ def get_binance_pairs():
         print(f"⚠️ Binance çiftleri alınırken hata oluştu: {e}")
         return []
 
-# 📌 Fiyat Alma Fonksiyonu
+# 📌 **Fiyat Alma Fonksiyonu**
 def get_price(coin):
     try:
         response = requests.get(f"{COINGECKO_API_URL}/simple/price?ids={coin}&vs_currencies=usd")
         data = response.json()
+        if response.status_code != 200:
+            print(f"⚠️ API Hatası! Durum Kodu: {response.status_code} - Yanıt: {data}")
         return data[coin]["usd"]
     except Exception as e:
         print(f"⚠️ {coin} fiyat alınırken hata oluştu: {e}")
         return None
+
 
 # 📌 Telegram Mesaj Gönderme
 def send_telegram_message(message):
